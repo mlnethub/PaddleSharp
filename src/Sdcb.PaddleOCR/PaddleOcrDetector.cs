@@ -1,25 +1,19 @@
 ﻿using OpenCvSharp;
 using Sdcb.PaddleInference;
 using System;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 
 namespace Sdcb.PaddleOCR
 {
-	public class PaddleOcrDetector : IDisposable
+    public class PaddleOcrDetector : IDisposable
 	{
 		PaddleConfig _c;
 		PaddlePredictor _p;
 
 		public PaddleOcrDetector(string modelDir)
 		{
-			_c = new PaddleConfig
-			{
-				CpuMathThreadCount = 0,
-				MkldnnEnabled = true,
-				MkldnnCacheCapacity = 10,
-			};
+			_c = new PaddleConfig();
 			_c.SetModel(
 				Path.Combine(modelDir, "inference.pdmodel"),
 				Path.Combine(modelDir, "inference.pdiparams"));

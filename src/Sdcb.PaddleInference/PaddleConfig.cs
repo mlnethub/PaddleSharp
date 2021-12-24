@@ -3,6 +3,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 
 namespace Sdcb.PaddleInference
 {
@@ -14,34 +15,102 @@ namespace Sdcb.PaddleInference
 		{
 			_ptr = PaddleNative.PD_ConfigCreate();
 
-			if (!EnableGLogOnNewInstance)
+			if (!EnableGLogByDefault)
             {
-				GLogEnabled = EnableGLogOnNewInstance;
+				GLogEnabled = EnableGLogByDefault;
 			}
+			if (EnableMkldnnByDefault)
+            {
+				MkldnnEnabled = true;
+				MkldnnCacheCapacity = MkldnnDefaultCacheCapacity;
+			}
+			if (CpuMathDefaultThreadCount != 0)
+            {
+				CpuMathThreadCount = CpuMathDefaultThreadCount;
+            }
 		}
 
 		public PaddleConfig(IntPtr configPointer)
 		{
 			_ptr = configPointer;
 
-			if (!EnableGLogOnNewInstance)
+			if (!EnableGLogByDefault)
 			{
-				GLogEnabled = EnableGLogOnNewInstance;
+				GLogEnabled = EnableGLogByDefault;
 			}
 		}
 
 		static PaddleConfig()
 		{
+#if NET6_0_OR_GREATER
+			SearchPathLoad();
+#elif NETSTANDARD2_0_OR_GREATER
+			AutoLoad();
+#endif
+		}
+
+		private static void AutoLoad()
+        {
+			// Linux would not supported in this case.
 			_ = Version;
 			string mkldnnPath = Path.GetDirectoryName(Process.GetCurrentProcess().Modules.Cast<ProcessModule>()
 				.Single(x => Path.GetFileNameWithoutExtension(x.ModuleName) == "paddle_inference_c")
-				.FileName);
-			Environment.SetEnvironmentVariable("PATH", Environment.GetEnvironmentVariable("PATH") + ";" + mkldnnPath);
+				.FileName)!;
+			AddLibPathToEnvironment(mkldnnPath);
+		}
+
+#if NET6_0_OR_GREATER
+		private static void SearchPathLoad()
+        {
+			string? dirs = (string?)AppContext.GetData("NATIVE_DLL_SEARCH_DIRECTORIES");
+			if (dirs != null)
+			{
+				bool windows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+				bool linux = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
+				if (windows)
+				{
+					string libName = windows ?
+						$"{PaddleNative.PaddleInferenceCLib}.dll" :
+						$"lib{PaddleNative.PaddleInferenceCLib}.so";
+
+					string? libPath = dirs.Split(new[] { Path.PathSeparator }, StringSplitOptions.RemoveEmptyEntries)
+						.FirstOrDefault(dir => File.Exists(Path.Combine(dir, libName)));
+					if (libPath != null)
+					{
+						AddLibPathToEnvironment(libPath);
+					}
+					else
+					{
+						Console.WriteLine($"Warn: {libName} not found from {dirs}, fallback to use auto load.");
+						AutoLoad();
+					}
+				}
+				else
+				{
+					Console.WriteLine("Warn: OSPlatform is not windows or linux, platform might not supported.");
+				}
+			}
+		}
+#endif
+
+		private static void AddLibPathToEnvironment(string libPath)
+        {
+#if NETSTANDARD2_0_OR_GREATER || NET6_0_OR_GREATER
+			bool isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+#else
+			const bool isWindows = true;
+#endif
+			string envId = isWindows ? "PATH" : "LD_LIBRARY_PATH";
+			Environment.SetEnvironmentVariable(envId, Environment.GetEnvironmentVariable(envId) + Path.PathSeparator + libPath);
 		}
 
 		public static string Version => PaddleNative.PD_GetVersion().UTF8PtrToString()!;
 
-		public static bool EnableGLogOnNewInstance = false;
+		public static bool EnableGLogByDefault = false;
+		public static bool EnableMkldnnByDefault = true;
+		public static int MkldnnDefaultCacheCapacity = 10;
+		public static int CpuMathDefaultThreadCount = 0;
+
 
 		public bool GLogEnabled
 		{
