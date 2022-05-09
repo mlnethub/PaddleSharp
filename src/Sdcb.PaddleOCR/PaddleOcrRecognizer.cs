@@ -3,159 +3,146 @@ using Sdcb.PaddleInference;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Sdcb.PaddleOCR
 {
-
     public class PaddleOcrRecognizer : IDisposable
-	{
-		private readonly PaddleConfig _c;
-		private readonly PaddlePredictor _p;
-		private readonly IReadOnlyList<string> _labels;
+    {
+        private readonly PaddlePredictor _p;
+        private readonly IReadOnlyList<string> _labels;
 
-		public PaddleOcrRecognizer(string modelDir, string labelFilePath)
-		{
-			_c = new PaddleConfig();
-			_c.SetModel(
-				Path.Combine(modelDir, "inference.pdmodel"),
-				Path.Combine(modelDir, "inference.pdiparams"));
-			_p = _c.CreatePredictor();
+        public PaddleOcrRecognizer(string modelDir, string labelFilePath) : this(PaddleConfig.FromModelDir(modelDir), File.ReadAllLines(labelFilePath))
+        {
+        }
 
-			List<string> labels = File.ReadAllLines(labelFilePath).ToList();
-			labels.Insert(0, "!!");
-			labels.Add(" ");
-			_labels = labels;
-		}
+        public PaddleOcrRecognizer(PaddleConfig config, IReadOnlyList<string> labels) : this(config.CreatePredictor(), labels)
+        {
+        }
 
-		public PaddleOcrRecognizer(PaddleConfig config, string labelFilePath)
-		{
-			_c = config;
-			_p = _c.CreatePredictor();
+        public PaddleOcrRecognizer(PaddlePredictor predictor, IReadOnlyList<string> labels)
+        {
+            _p = predictor;
+            _labels = labels;
+        }
 
-			List<string> labels = File.ReadAllLines(labelFilePath).ToList();
-			labels.Insert(0, "!!");
-			labels.Add(" ");
-			_labels = labels;
-		}
+        public PaddleOcrRecognizer Clone()
+        {
+            return new PaddleOcrRecognizer(_p.Clone(), _labels);
+        }
 
-		public void Dispose()
-		{
-			_p.Dispose();
-			_c.Dispose();
-		}
+        public void Dispose()
+        {
+            _p.Dispose();
+        }
 
-		public static PaddleOcrRecognizerResult StaticRun(PaddlePredictor predictor, Mat src, IReadOnlyList<string> labels)
-		{
-			using Mat resized = ResizePadding(src);
-			using Mat normalized = Normalize(resized);
-
-			using (PaddleTensor input = predictor.GetInputTensor(predictor.InputNames[0]))
-			{
-				input.Shape = new[] { 1, 3, normalized.Rows, normalized.Cols };
-				float[] data = ExtractMat(normalized);
-				input.SetData(data);
-			}
-			if (!predictor.Run())
+        private string GetLabelByIndex(int i)
+        {
+            return i switch
             {
-				throw new Exception($"PaddlePredictor(Recognizer) run failed.");
+                var x when x > 0 && x <= _labels.Count => _labels[x - 1],
+                var x when x == _labels.Count + 1 => " ",
+                _ => " ", /* error */
+            };
+        }
+
+        public PaddleOcrRecognizerResult Run(Mat src)
+        {
+            if (src.Empty())
+            {
+                throw new ArgumentException("src size should not be 0, wrong input picture provided?");
             }
 
-			using (PaddleTensor output = predictor.GetOutputTensor(predictor.OutputNames[0]))
-			{
-				float[] data = output.GetData<float>();
-				int[] shape = output.Shape;
+            if (!(src.Channels() switch { 3 or 1 => true, _ => false }))
+            {
+                throw new NotSupportedException($"{nameof(src)} channel must be 3 or 1, provided {src.Channels()}.");
+            }
 
-				var sb = new StringBuilder();
-				int lastIndex = 0;
-				float score = 0;
+            using Mat resized = ResizePadding(src);
+            using Mat normalized = Normalize(resized);
 
-				for (int n = 0; n < shape[1]; ++n)
-				{
-					float[] matArray = new float[shape[2]];
-					Array.Copy(data, n * shape[2], matArray, 0, matArray.Length);
-					using Mat mat = new Mat(1, shape[2], MatType.CV_32FC1, matArray);
-					int[] maxIdx = new int[2];
-					mat.MinMaxIdx(out double _, out double maxVal, new int[0], maxIdx);
+            using (PaddleTensor input = _p.GetInputTensor(_p.InputNames[0]))
+            {
+                input.Shape = new[] { 1, 3, normalized.Rows, normalized.Cols };
+                float[] data = PaddleOcrDetector.ExtractMat(normalized);
+                input.SetData(data);
+            }
+            if (!_p.Run())
+            {
+                throw new Exception($"PaddlePredictor(Recognizer) run failed.");
+            }
 
-					if (maxIdx[1] > 0 && (!(n > 0 && maxIdx[1] == lastIndex)))
-					{
-						score += (float)maxVal;
-						sb.Append(labels[maxIdx[1]]);
-					}
-					lastIndex = maxIdx[1];
-				}
-				return new(sb.ToString(), score / sb.Length);
-			}
-		}
+            using (PaddleTensor output = _p.GetOutputTensor(_p.OutputNames[0]))
+            {
+                float[] data = output.GetData<float>();
+                int[] shape = output.Shape;
 
-		public PaddleOcrRecognizerResult Run(Mat src)
-		{
-			return StaticRun(_p, src, _labels);
-		}
+                var sb = new StringBuilder();
+                int lastIndex = 0;
+                float score = 0;
 
-		public PaddleOcrRecognizerResult ConcurrentRun(Mat src)
-		{
-			PaddlePredictor p;
-			lock (_p)
-			{
-				p = _p.Clone();
-			}
+                GCHandle dataHandle = default;
+                try
+                {
+                    dataHandle = GCHandle.Alloc(data, GCHandleType.Pinned);
+                    IntPtr dataPtr = dataHandle.AddrOfPinnedObject();
+                    int len = shape[2];
 
-			using (p)
-			{
-				return StaticRun(p, src, _labels);
-			}
-		}
+                    for (int n = 0; n < shape[1]; ++n)
+                    {
+                        using Mat mat = new Mat(1, len, MatType.CV_32FC1, dataPtr + n * len * sizeof(float));
+                        int[] maxIdx = new int[2];
+                        mat.MinMaxIdx(out double _, out double maxVal, new int[0], maxIdx);
 
-		private unsafe static float[] ExtractMat(Mat src)
-		{
-			int rows = src.Rows;
-			int cols = src.Cols;
-			float[] result = new float[rows * cols * 3];
-			fixed (float* data = result)
-			{
-				for (int i = 0; i < src.Channels(); ++i)
-				{
-					using Mat dest = new Mat(rows, cols, MatType.CV_32FC1, (IntPtr)(data + i * rows * cols));
-					Cv2.ExtractChannel(src, dest, i);
-				}
-			}
-			return result;
-		}
+                        if (maxIdx[1] > 0 && (!(n > 0 && maxIdx[1] == lastIndex)))
+                        {
+                            score += (float)maxVal;
+                            sb.Append(GetLabelByIndex(maxIdx[1]));
+                        }
+                        lastIndex = maxIdx[1];
+                    }
+                }
+                finally
+                {
+                    dataHandle.Free();
+                }
 
-		private static Mat ResizePadding(Mat src)
-		{
-			Size size = src.Size();
-			float whRatio = 1.0f * size.Width / size.Height;
-			int height = 32;
-			int width = (int)Math.Ceiling(height * whRatio);
+                return new(sb.ToString(), score / sb.Length);
+            }
+        }
 
-			return src.Resize(new Size(width, height));
-		}
+        private static Mat ResizePadding(Mat src)
+        {
+            Size size = src.Size();
+            float whRatio = 1.0f * size.Width / size.Height;
+            int height = 32;
+            int width = (int)Math.Ceiling(height * whRatio);
 
-		private static Mat Normalize(Mat src)
-		{
-			using Mat normalized = new();
-			src.ConvertTo(normalized, MatType.CV_32FC3, 1.0 / 255);
-			Mat[] bgr = normalized.Split();
-			float[] scales = new[] { 2.0f, 2.0f, 2.0f };
-			float[] means = new[] { 0.5f, 0.5f, 0.5f };
-			for (int i = 0; i < bgr.Length; ++i)
-			{
-				bgr[i].ConvertTo(bgr[i], MatType.CV_32FC1, 1.0 * scales[i], (0.0 - means[i]) * scales[i]);
-			}
+            return src.Resize(new Size(width, height));
+        }
 
-			Mat dest = new();
-			Cv2.Merge(bgr, dest);
+        private static Mat Normalize(Mat src)
+        {
+            using Mat normalized = new();
+            src.ConvertTo(normalized, MatType.CV_32FC3, 1.0 / 255);
+            Mat[] bgr = normalized.Split();
+            float[] scales = new[] { 2.0f, 2.0f, 2.0f };
+            float[] means = new[] { 0.5f, 0.5f, 0.5f };
+            for (int i = 0; i < bgr.Length; ++i)
+            {
+                bgr[i].ConvertTo(bgr[i], MatType.CV_32FC1, 1.0 * scales[i], (0.0 - means[i]) * scales[i]);
+            }
 
-			foreach (Mat channel in bgr)
-			{
-				channel.Dispose();
-			}
+            Mat dest = new();
+            Cv2.Merge(bgr, dest);
 
-			return dest;
-		}
-	}
+            foreach (Mat channel in bgr)
+            {
+                channel.Dispose();
+            }
+
+            return dest;
+        }
+    }
 }

@@ -4,7 +4,7 @@
   <IncludeUncapsulator>false</IncludeUncapsulator>
 </Query>
 
-const string Version = "2.2.1.8";
+const string Version = "2.2.2.1";
 
 async Task Main()
 {
@@ -26,6 +26,7 @@ string[] Projects = new[]
 	"Sdcb.PaddleInference",
 	"Sdcb.PaddleOCR",
 	"Sdcb.PaddleOCR.KnownModels", 
+	"Sdcb.PaddleDetection", 
 };
 
 static async Task DownloadFile(Uri uri, string localFile, CancellationToken cancellationToken = default)
