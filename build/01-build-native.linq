@@ -10,17 +10,25 @@
 
 #load ".\00-common"
 
+static string NativeVersion => Projects.First(x => x.name == "Sdcb.PaddleInference").version;
+
 async Task Main()
 {
 	await SetupAsync(QueryCancelToken);
 	//await new LinuxNuGetSource().Process(QueryCancelToken);
-	//await new WindowsNugetSource("win-x64", "win64.mkl", "paddle_inference_c.dll", new Uri(@"https://paddle-inference-lib.bj.bcebos.com/2.2.2/cxx_c/Windows/CPU/x86-64_vs2017_avx_mkl/paddle_inference_c.zip"))
-	//	.Process(QueryCancelToken);
-	//await new WindowsNugetSource("win-x64", "win64.openblas", "paddle_inference_c.dll", new Uri(@"https://paddle-inference-lib.bj.bcebos.com/2.2.2/cxx_c/Windows/CPU/x86-64_vs2017_avx_openblas/paddle_inference_c.zip"))
-	//	.Process(QueryCancelToken);
-	await new WindowsNugetSource("win-x64", "win64.cuda10_cudnn7", "paddle_inference_c.dll", new Uri("https://paddle-inference-lib.bj.bcebos.com/2.2.2/cxx_c/Windows/GPU/x86-64_vs2017_avx_mkl_cuda10.1_cudnn7/paddle_inference_c_notrt.zip"))
+	await new WindowsNugetSource("win-x64", "win64.mkl", "paddle_inference_c.dll", new Uri(@"https://paddle-inference-lib.bj.bcebos.com/2.4.1/cxx_c/Windows/CPU/x86-64_avx-mkl-vs2017/paddle_inference_c.zip"))
 		.Process(QueryCancelToken);
-	//await new WindowsNugetSource("win-x64", "win64.cuda11_cudnn8_tr7", "paddle_inference_c.dll", new Uri("https://paddle-inference-lib.bj.bcebos.com/2.2.2/cxx_c/Windows/GPU/x86-64_vs2017_avx_mkl_cuda11.0_cudnn8/paddle_inference_c.zip"))
+	await new WindowsNugetSource("win-x64", "win64.openblas", "paddle_inference_c.dll", new Uri(@"https://paddle-inference-lib.bj.bcebos.com/2.4.1/cxx_c/Windows/CPU/x86-64_avx-openblas-vs2017/paddle_inference_c.zip"))
+		.Process(QueryCancelToken);
+	//await new WindowsNugetSource("win-x64", "win64.cuda102_cudnn76_tr70", "paddle_inference_c.dll", new Uri("https://paddle-inference-lib.bj.bcebos.com/2.4.0/cxx_c/Windows/GPU/x86-64_cuda10.2_cudnn7.6.5_trt7.0.0.11_mkl_avx_vs2017/paddle_inference_c.zip"))
+	//	.Process(QueryCancelToken);
+	//await new WindowsNugetSource("win-x64", "win64.cuda112_cudnn82_tr82", "paddle_inference_c.dll", new Uri("https://paddle-inference-lib.bj.bcebos.com/2.4.0/cxx_c/Windows/GPU/x86-64_cuda11.2_cudnn8.2.1_trt8.0.1.6_mkl_avx_vs2019/paddle_inference_c.zip"))
+	//	.Process(QueryCancelToken);
+	//await new WindowsNugetSource("win-x64", "win64.cuda116_cudnn84_tr84", "paddle_inference_c.dll", new Uri("https://paddle-inference-lib.bj.bcebos.com/2.4.0/cxx_c/Windows/GPU/x86-64_cuda11.6_cudnn8.4.0_trt8.4.1.5_mkl_avx_vs2019/paddle_inference_c.zip"))
+	//	.Process(QueryCancelToken);
+	//await new WindowsNugetSource("win-x64", "win64.cuda117_cudnn84_tr84", "paddle_inference_c.dll", new Uri("https://paddle-inference-lib.bj.bcebos.com/2.4.0/cxx_c/Windows/GPU/x86-64_cuda11.7_cudnn8.4.1_trt8.4.2.4_mkl_avx_vs2019/paddle_inference_c.zip"))
+	//	.Process(QueryCancelToken);
+	//await new WindowsNugetSource("win-x64", "win64.cuda117_cudnn84_tr84_sm86", "paddle_inference_c.dll", new Uri("https://io.starworks.cc:88/paddlesharp/native-libs/2.4.0/vs2019-cuda117-cudnn84-sm86-onnx-trt.zip"))
 	//	.Process(QueryCancelToken);
 }
 
@@ -143,7 +151,7 @@ public record LinuxNuGetSource() : NupkgBuildSource("linux-x64", "linux64.mkl", 
 				// Console.WriteLine($"{src} -> {dest}");
 			}
 		}
-		
+
 		return Task.FromResult(0);
 	}
 
@@ -159,7 +167,7 @@ public abstract record NupkgBuildSource(string rid, string titleRid, string libN
 {
 	public string CLibFilePath => $@"./{titleRid}/bin/{libName}";
 	public string PlatformDir => Path.GetDirectoryName(CLibFilePath);
-	public string NuGetPath => $@".\nupkgs\Sdcb.PaddleInference.runtime.{titleRid}.{Version}.nupkg";
+	public string NuGetPath => $@".\nupkgs\Sdcb.PaddleInference.runtime.{titleRid}.{NativeVersion}.nupkg";
 
 	public async Task<string> EnsurePackage(CancellationToken cancellationToken = default)
 	{
@@ -191,7 +199,7 @@ public abstract record NupkgBuildSource(string rid, string titleRid, string libN
 			File.Delete(localZipFile);
 		}
 		string[] libs = GetDlls();
-		
+
 		string nugetExePath = await EnsureNugetExe(cancellationToken);
 
 		string nuspecPath = BuildNuspec(libs, rid, titleRid);
@@ -199,7 +207,7 @@ public abstract record NupkgBuildSource(string rid, string titleRid, string libN
 		{
 			string iconDestPath = @$".\{titleRid}\icon.jpg";
 			if (!File.Exists(iconDestPath)) File.Copy(@$".\icon.jpg", iconDestPath);
-			NuGetRun($@"pack {nuspecPath} -Version {Version} -OutputDirectory .\nupkgs".Dump());
+			NuGetRun($@"pack {nuspecPath} -Version {NativeVersion} -OutputDirectory .\nupkgs".Dump());
 			File.Delete(@$".\{titleRid}\icon.jpg");
 		}
 		else

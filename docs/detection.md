@@ -22,9 +22,8 @@
    ```
 4. Using following C# code to get result:
    ```csharp
-   PaddleConfig.Defaults.UseGpu = false;
    string modelDir = DetectionLocalModel.PicoDets.L_416_coco.Directory; // your model directory here
-   using (PaddleDetector detector = new PaddleDetector(modelDir, Path.Combine(modelDir, "infer_cfg.yml")))
+   using (PaddleDetector detector = new PaddleDetector(modelDir, Path.Combine(modelDir, "infer_cfg.yml"), PaddleDevice.Mkldnn()))
    using (VideoCapture vc = new VideoCapture())
    {
        vc.Open(0);
@@ -45,3 +44,6 @@
        }
    }
    ```
+
+running effect(for image):
+![image](https://user-images.githubusercontent.com/1317141/222453236-fc7c25b8-c5ca-41b7-bf93-ac2708bb8c62.png)

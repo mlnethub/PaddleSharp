@@ -1,15 +1,22 @@
 ﻿using OpenCvSharp;
 using Sdcb.PaddleInference;
+using Sdcb.PaddleOCR.Models;
 using System;
 
 namespace Sdcb.PaddleOCR
 {
-
     public class PaddleOcrClassifier : IDisposable
     {
         private readonly PaddlePredictor _p;
 
-        public double RotateThreshold { get; set; } = 0.75;
+        public double RotateThreshold { get; init; } = 0.75;
+
+        public OcrShape Shape { get; init; } = ClassificationModel.DefaultShape;
+
+        public PaddleOcrClassifier(ClassificationModel model, Action<PaddleConfig> configure) : this(model.CreateConfig().Apply(configure).CreatePredictor())
+        {
+            Shape = model.Shape;
+        }
 
         public PaddleOcrClassifier(PaddleConfig config) : this(config.CreatePredictor())
         {
@@ -24,15 +31,13 @@ namespace Sdcb.PaddleOCR
         {
         }
 
-        public PaddleOcrClassifier Clone()
+        public PaddleOcrClassifier Clone() => new PaddleOcrClassifier(_p.Clone())
         {
-            return new PaddleOcrClassifier(_p.Clone());
-        }
+            RotateThreshold = RotateThreshold,
+            Shape = Shape,
+        };
 
-        public void Dispose()
-        {
-            _p.Dispose();
-        }
+        public void Dispose() => _p.Dispose();
 
         public bool ShouldRotate180(Mat src)
         {
@@ -46,7 +51,7 @@ namespace Sdcb.PaddleOCR
                 throw new NotSupportedException($"{nameof(src)} channel must be 3 or 1, provided {src.Channels()}.");
             }
 
-            using Mat resized = ResizePadding(src);
+            using Mat resized = ResizePadding(src, Shape);
             using Mat normalized = Normalize(resized);
 
             using (PaddleTensor input = _p.GetInputTensor(_p.InputNames[0]))
@@ -92,9 +97,8 @@ namespace Sdcb.PaddleOCR
 
             if (ShouldRotate180(src))
             {
-                Mat dest = new();
-                Cv2.Rotate(src, dest, RotateFlags.Rotate180);
-                return dest;
+                Cv2.Rotate(src, src, RotateFlags.Rotate180);
+                return src;
             }
             else
             {
@@ -102,9 +106,7 @@ namespace Sdcb.PaddleOCR
             }
         }
 
-        private static (int channel, int height, int width) shape = (3, 48, 192);
-
-        private static Mat ResizePadding(Mat src)
+        private static Mat ResizePadding(Mat src, OcrShape shape)
         {
             Size srcSize = src.Size();
             using Mat roi = srcSize.Width / srcSize.Height > shape.width / shape.height ?

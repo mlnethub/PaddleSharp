@@ -9,7 +9,7 @@
     <RepositoryUrl>https://github.com/sdcb/PaddleSharp.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>Sdcb;AI;Paddle;OCR;PaddleOCR</PackageTags>
-    <VersionPrefix>2.2.1</VersionPrefix>
+    <VersionPrefix>2.6</VersionPrefix>
     <PackageIcon>icon.jpg</PackageIcon>
     <Description>Awesome multilingual OCR toolkits based on PaddlePaddle (practical ultra lightweight OCR system, support 80+ languages recognition)</Description>
     <Authors>sdcb</Authors>
@@ -23,11 +23,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="OpenCvSharp4" Version="4.5.5.20211231" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\Sdcb.PaddleInference\Sdcb.PaddleInference.csproj" />
+    <PackageReference Include="OpenCvSharp4" Version="4.7.0.20230115" />
+    <PackageReference Include="PolySharp" Version="1.13.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Sdcb.PaddleInference" Version="2.4.1.2" />
   </ItemGroup>
 
 </Project>

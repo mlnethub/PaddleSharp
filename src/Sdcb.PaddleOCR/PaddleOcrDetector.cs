@@ -1,5 +1,6 @@
 ﻿using OpenCvSharp;
 using Sdcb.PaddleInference;
+using Sdcb.PaddleOCR.Models;
 using System;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -10,12 +11,16 @@ namespace Sdcb.PaddleOCR
     {
         readonly PaddlePredictor _p;
 
-        public int? MaxSize { get; set; } = 2048;
+        public int? MaxSize { get; set; } = 1536;
         public int? DilatedSize { get; set; } = 2;
         public float? BoxScoreThreahold { get; set; } = 0.7f;
         public float? BoxThreshold { get; set; } = 0.3f;
         public int MinSize { get; set; } = 3;
         public float UnclipRatio { get; set; } = 2.0f;
+
+        public PaddleOcrDetector(DetectionModel model, Action<PaddleConfig> configure) : this(model.CreateConfig().Apply(configure))
+        {
+        }
 
         public PaddleOcrDetector(PaddleConfig config) : this(config.CreatePredictor())
         {
@@ -114,12 +119,14 @@ namespace Sdcb.PaddleOCR
                     .Select(rect =>
                     {
                         float minEdge = Math.Min(rect.Size.Width, rect.Size.Height);
-                        Size2f newSize = new Size2f(
+                        Size2f newSize = new(
                             (rect.Size.Width + UnclipRatio * minEdge) * scaleRate,
                             (rect.Size.Height + UnclipRatio * minEdge) * scaleRate);
-                        RotatedRect largerRect = new RotatedRect(rect.Center * scaleRate, newSize, rect.Angle);
+                        RotatedRect largerRect = new(rect.Center * scaleRate, newSize, rect.Angle);
                         return largerRect;
                     })
+                    .OrderBy(v => v.Center.Y)
+                    .ThenBy(v => v.Center.X)
                     .ToArray();
                 //{
                 //	using Mat demo = dilated.CvtColor(ColorConversionCodes.GRAY2RGB);

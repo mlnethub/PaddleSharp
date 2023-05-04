@@ -1,6 +1,7 @@
 ﻿using OpenCvSharp;
+using Sdcb.PaddleInference;
+using Sdcb.PaddleOCR.Models;
 using System;
-using System.IO;
 using System.Linq;
 
 namespace Sdcb.PaddleOCR
@@ -8,27 +9,48 @@ namespace Sdcb.PaddleOCR
     public class PaddleOcrAll : IDisposable
     {
         public PaddleOcrDetector Detector { get; }
-        public PaddleOcrClassifier Classifier { get; }
+        public PaddleOcrClassifier? Classifier { get; }
         public PaddleOcrRecognizer Recognizer { get; }
 
         public bool Enable180Classification { get; set; } = false;
         public bool AllowRotateDetection { get; set; } = true;
 
-        public PaddleOcrAll(string modelPath, string labelFilePath)
+        public PaddleOcrAll(FullOcrModel model, Action<PaddleConfig> device)
         {
-            Detector = new(Path.Combine(modelPath, "det"));
-            Classifier = new PaddleOcrClassifier(Path.Combine(modelPath, "cls"));
-            Recognizer = new(Path.Combine(modelPath, "rec"), labelFilePath);
+            Detector = new PaddleOcrDetector(model.DetectionModel, device);
+            if (model.ClassificationModel != null)
+            {
+                Classifier = new PaddleOcrClassifier(model.ClassificationModel, device);
+            }
+            Recognizer = new PaddleOcrRecognizer(model.RecognizationModel, device);
         }
 
-        public PaddleOcrAll(string detectionModelDir, string classificationModelDir, string recognitionModelDir, string labelFilePath)
+        public PaddleOcrAll(FullOcrModel model, 
+            Action<PaddleConfig>? detectorDevice = null,
+            Action<PaddleConfig>? classifierDevice = null,
+            Action<PaddleConfig>? recognizerDevice = null)
         {
-            Detector = new(detectionModelDir);
-            Classifier = new PaddleOcrClassifier(classificationModelDir);
-            Recognizer = new(recognitionModelDir, labelFilePath);
+            Detector = new PaddleOcrDetector(model.DetectionModel, detectorDevice ?? PaddleDevice.Mkldnn());
+            if (model.ClassificationModel != null)
+            {
+                Classifier = new PaddleOcrClassifier(model.ClassificationModel, classifierDevice ?? PaddleDevice.Mkldnn());
+            }
+            Recognizer = new PaddleOcrRecognizer(model.RecognizationModel, recognizerDevice ?? PaddleDevice.Mkldnn());
         }
 
-        public PaddleOcrAll(PaddleOcrDetector detector, PaddleOcrClassifier classifier, PaddleOcrRecognizer recognizer)
+        [Obsolete("use PaddleOcrAll(PaddleOcrDetector detector, PaddleOcrClassifier? classifier, PaddleOcrRecognizer recognizer)")]
+        public PaddleOcrAll(string modelPath, string labelFilePath, ModelVersion version, Action<PaddleConfig> configure)
+            : this(FullOcrModel.FromDirectory(modelPath, labelFilePath, version), configure)
+        {
+        }
+
+        [Obsolete("use PaddleOcrAll(PaddleOcrDetector detector, PaddleOcrClassifier? classifier, PaddleOcrRecognizer recognizer)")]
+        public PaddleOcrAll(string detectionModelDir, string classificationModelDir, string recognitionModelDir, string labelFilePath, ModelVersion version, Action<PaddleConfig> configure)
+            : this(FullOcrModel.FromDirectory(detectionModelDir, classificationModelDir, recognitionModelDir, labelFilePath, version), configure)
+        {
+        }
+
+        public PaddleOcrAll(PaddleOcrDetector detector, PaddleOcrClassifier? classifier, PaddleOcrRecognizer recognizer)
         {
             Detector = detector;
             Classifier = classifier;
@@ -37,7 +59,7 @@ namespace Sdcb.PaddleOCR
 
         public PaddleOcrAll Clone()
         {
-            return new PaddleOcrAll(Detector.Clone(), Classifier.Clone(), Recognizer.Clone())
+            return new PaddleOcrAll(Detector.Clone(), Classifier?.Clone(), Recognizer.Clone())
             {
                 AllowRotateDetection = AllowRotateDetection,
                 Enable180Classification = Enable180Classification,
@@ -53,20 +75,35 @@ namespace Sdcb.PaddleOCR
                 MathUtil.Clamp(rect.Bottom, 0, size.Height));
         }
 
-        public PaddleOcrResult Run(Mat src)
+        public PaddleOcrResult Run(Mat src, int recognizeBatchSize = 0)
         {
+            if (Enable180Classification && Classifier == null)
+            {
+                throw new Exception($"Unable to do 180 degree Classification when classifier model is not set.");
+            }
+
             RotatedRect[] rects = Detector.Run(src);
-            return new PaddleOcrResult(rects
-                .Select(rect =>
+
+            Mat[] mats =
+                rects.Select(rect =>
                 {
-                    using Mat roi = AllowRotateDetection ? GetRotateCropImage(src, rect) : src[GetCropedRect(rect.BoundingRect(), src.Size())];
-                    using Mat cls = Enable180Classification ? Classifier.Run(roi) : roi;
-                    PaddleOcrRecognizerResult result = Recognizer.Run(cls);
-                    PaddleOcrResultRegion region = new(rect, result.Text, result.Score);
-                    //Util.HorizontalRun(true, Image(roi), Image(cls), result.Text, result.Score, rect.Angle, rect.Size.Width > rect.Size.Height).Dump();
-                    return region;
+                    Mat roi = AllowRotateDetection ? GetRotateCropImage(src, rect) : src[GetCropedRect(rect.BoundingRect(), src.Size())];
+                    return Enable180Classification ? Classifier!.Run(roi) : roi;
                 })
-                .ToArray());
+                .ToArray();
+            try
+            {
+                return new PaddleOcrResult(Recognizer.Run(mats, recognizeBatchSize)
+                    .Select((result, i) => new PaddleOcrResultRegion(rects[i], result.Text, result.Score))
+                    .ToArray());
+            }
+            finally
+            {
+                foreach (Mat mat in mats)
+                {
+                    mat.Dispose();
+                }
+            }
         }
 
         public static Mat GetRotateCropImage(Mat src, RotatedRect rect)
@@ -122,7 +159,7 @@ namespace Sdcb.PaddleOCR
         public void Dispose()
         {
             Detector.Dispose();
-            Classifier.Dispose();
+            Classifier?.Dispose();
             Recognizer.Dispose();
         }
     }

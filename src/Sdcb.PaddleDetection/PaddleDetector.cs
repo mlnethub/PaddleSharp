@@ -15,7 +15,7 @@ namespace Sdcb.PaddleDetection
 		private readonly Preprocessor _preprocessor;
 		public DetectionModelConfig Config { get; }
 
-		public PaddleDetector(PaddleConfig config, string configYmlPath) : this(config.CreatePredictor(), configYmlPath)
+		public PaddleDetector(PaddleConfig config, string configYmlPath, Action<PaddleConfig> configure = null) : this(config.Apply(configure ?? PaddleDevice.Mkldnn()).CreatePredictor(), configYmlPath)
 		{
 		}
 
@@ -30,9 +30,9 @@ namespace Sdcb.PaddleDetection
 			_preprocessor = new Preprocessor((YamlSequenceNode)doc.RootNode["Preprocess"]);
 		}
 
-		public PaddleDetector(string modelDir, string configYmlPath) : this(PaddleConfig.FromModelFiles(
+		public PaddleDetector(string modelDir, string configYmlPath, Action<PaddleConfig> configure = null) : this(PaddleConfig.FromModelFiles(
 			Path.Combine(modelDir, "model.pdmodel"),
-			Path.Combine(modelDir, "model.pdiparams")), configYmlPath)
+			Path.Combine(modelDir, "model.pdiparams")), configYmlPath, configure)
 		{
 		}
 
